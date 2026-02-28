@@ -52,7 +52,9 @@ async def test_db_engine():
 
 @pytest.fixture(scope="function")
 async def db_session(test_db_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create a test database session"""
+    """Create a test database session with tenant schema"""
+    from sqlalchemy import text
+    
     async_session = async_sessionmaker(
         test_db_engine,
         class_=AsyncSession,
@@ -60,6 +62,8 @@ async def db_session(test_db_engine) -> AsyncGenerator[AsyncSession, None]:
     )
     
     async with async_session() as session:
+        # Set search_path to test tenant schema
+        await session.execute(text("SET search_path TO tenant_test"))
         yield session
         await session.rollback()
 
