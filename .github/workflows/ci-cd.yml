@@ -64,6 +64,12 @@ jobs:
         run: |
           python scripts/generate_jwt_keys.py
       
+      - name: Create database schema
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
+        run: |
+          python scripts/init_test_db.py
+      
       - name: Run linting (ruff)
         run: |
           ruff check app/ tests/ --output-format=github
