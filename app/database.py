@@ -247,3 +247,14 @@ async def close_db() -> None:
     """
     await db_manager.close()
     logger.info("Database closed")
+
+
+# Export engine for direct access (e.g., in middleware)
+def get_engine() -> AsyncEngine:
+    """Get the database engine instance"""
+    return db_manager.engine
+
+
+# Initialize engine on module import for middleware access
+db_manager.initialize()
+engine = db_manager.engine

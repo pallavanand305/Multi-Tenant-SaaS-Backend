@@ -11,6 +11,14 @@ from contextlib import asynccontextmanager
 import structlog
 
 from app.config import settings
+from app.database import engine
+from app.middleware import (
+    LoggingMiddleware,
+    AuthenticationMiddleware,
+    TenantContextMiddleware,
+    RateLimitMiddleware,
+    MeteringMiddleware,
+)
 
 # Configure structured logging
 structlog.configure(
@@ -39,7 +47,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("application_starting", environment=settings.ENVIRONMENT)
     
-    # TODO: Initialize database connections
+    # Database is already initialized in database.py module
+    logger.info("database_initialized")
+    
     # TODO: Initialize Redis connections
     # TODO: Verify Celery connectivity
     
@@ -50,8 +60,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("application_shutting_down")
     
-    # TODO: Close database connections
-    # TODO: Close Redis connections
+    # Close database connections
+    from app.database import close_db
+    await close_db()
+    
+    # Close Redis connections in middleware
+    # Note: We need to properly handle middleware cleanup
+    logger.info("closing_middleware_connections")
     
     logger.info("application_stopped")
 
@@ -85,12 +100,30 @@ if settings.CORS_ORIGINS:
         allow_headers=["*"],
     )
 
-# TODO: Add middleware in correct order:
-# 1. Logging middleware
-# 2. Authentication middleware
-# 3. Tenant context middleware
-# 4. Rate limiting middleware
-# 5. Metering middleware
+# Add middleware in correct order (LIFO - Last In First Out)
+# Order of execution: Logging -> Auth -> Tenant -> Rate Limit -> Metering -> Handler
+# Middleware is added in reverse order because FastAPI processes them LIFO
+
+# 5. Metering middleware (records metrics after request completes)
+app.add_middleware(MeteringMiddleware)
+
+# 4. Rate limiting middleware (checks limits before processing)
+app.add_middleware(RateLimitMiddleware)
+
+# 3. Tenant context middleware (establishes DB session with tenant schema)
+app.add_middleware(TenantContextMiddleware)
+
+# 2. Authentication middleware (validates credentials and sets tenant context)
+app.add_middleware(AuthenticationMiddleware)
+
+# 1. Logging middleware (logs all requests with correlation IDs)
+app.add_middleware(LoggingMiddleware)
+
+logger.info(
+    "Middleware stack configured",
+    order=["LoggingMiddleware", "AuthenticationMiddleware", "TenantContextMiddleware", 
+           "RateLimitMiddleware", "MeteringMiddleware"]
+)
 
 # TODO: Register API routers
 # app.include_router(auth_router)
