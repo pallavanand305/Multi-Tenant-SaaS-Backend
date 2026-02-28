@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.auth.jwt_handler import JWTHandler, TokenPayload, AuthenticationError
 from app.auth.api_key_manager import APIKeyManager, APIKeyPayload, APIKeyError
+from app.auth.rbac import RBACEngine
 from app.models.tenant import User
 from app.config import settings
 
@@ -83,7 +84,8 @@ class AuthService:
     def __init__(
         self,
         jwt_handler: Optional[JWTHandler] = None,
-        api_key_manager: Optional[APIKeyManager] = None
+        api_key_manager: Optional[APIKeyManager] = None,
+        rbac_engine: Optional[RBACEngine] = None
     ):
         """
         Initialize authentication service.
@@ -91,9 +93,11 @@ class AuthService:
         Args:
             jwt_handler: JWT handler instance (creates default if not provided)
             api_key_manager: API key manager instance (creates default if not provided)
+            rbac_engine: RBAC engine instance (creates default if not provided)
         """
         self.jwt_handler = jwt_handler or JWTHandler()
         self.api_key_manager = api_key_manager or APIKeyManager()
+        self.rbac_engine = rbac_engine or RBACEngine()
         
         logger.info("AuthService initialized")
     
@@ -486,3 +490,75 @@ class AuthService:
         # For API key authentication, caller should use async method directly
         logger.warning("extract_tenant_context called without token - use async methods for API key auth")
         return None
+
+    def check_permission(
+        self,
+        role: str,
+        action: str,
+        resource: str
+    ) -> bool:
+        """
+        Check if a role has permission to perform an action on a resource.
+        
+        Uses the RBAC engine to evaluate permissions based on default roles
+        or tenant-specific policies.
+        
+        Args:
+            role: User's role (e.g., admin, developer, read_only)
+            action: Action to perform (e.g., create, read, update, delete)
+            resource: Resource type (e.g., users, api_keys, resources, jobs)
+        
+        Returns:
+            True if role has permission, False otherwise
+        
+        Requirements: 3.1, 3.3, 3.4
+        
+        Example:
+            allowed = auth_service.check_permission("developer", "read", "resources")
+            if not allowed:
+                raise AuthorizationError("Insufficient permissions")
+        """
+        return self.rbac_engine.check_permission(role, action, resource)
+    
+    async def check_permission_with_db(
+        self,
+        db: AsyncSession,
+        tenant_id: str,
+        role: str,
+        action: str,
+        resource: str
+    ) -> bool:
+        """
+        Check permission with automatic tenant policy loading.
+        
+        Loads tenant-specific RBAC policies from database and performs
+        permission check. Uses caching to avoid repeated database queries.
+        
+        Args:
+            db: Database session (must be set to tenant schema)
+            tenant_id: Tenant identifier
+            role: User's role
+            action: Action to perform
+            resource: Resource type
+        
+        Returns:
+            True if role has permission, False otherwise
+        
+        Requirements: 3.1, 3.3, 3.4, 3.5
+        
+        Example:
+            allowed = await auth_service.check_permission_with_db(
+                db=session,
+                tenant_id="tenant_abc",
+                role="developer",
+                action="create",
+                resource="resources"
+            )
+        """
+        return await self.rbac_engine.check_permission_with_db(
+            db=db,
+            tenant_id=tenant_id,
+            role=role,
+            action=action,
+            resource=resource
+        )
